@@ -1,0 +1,316 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+//
+// These used to be free-form strings, which let the web client write
+// "ACCEPTED", the mobile client write "confirmed" and the finance queries look
+// for "confirmed" - so work accepted on the web never counted towards a
+// worker's earnings. The database is now the single source of truth.
+// ---------------------------------------------------------------------------
+
+enum BookingStatus {
+  DRAFT
+  CONFIRMED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum AssignmentStatus {
+  ASSIGNED
+  CONFIRMED
+  DECLINED
+  COMPLETED
+}
+
+enum MemberStatus {
+  INVITED
+  ACTIVE
+  INACTIVE
+}
+
+enum MemberRole {
+  OWNER
+  ADMIN
+  MANAGER
+  MEMBER
+}
+
+enum ClientPaymentType {
+  DEPOSIT
+  PAYMENT
+  FINAL_PAYMENT
+  REFUND
+}
+
+model Role {
+  id        String     @id @default(cuid())
+  name      String     @unique // e.g. "ADMIN", "MANAGER", "WORKER"
+  userRoles UserRole[]
+}
+
+model Studio {
+  id          String  @id @default(cuid())
+  name        String
+  address     String?
+  city        String?
+  state       String?
+  zipCode     String?
+  country     String?
+  logoUrl     String?
+  email       String?
+  phone       String?
+  website     String?
+  currency    String? @default("USD")
+  timezone    String?
+  createdById String?
+
+  creatives   User[]         @relation("StudioCreatives")
+  teamMembers StudioMember[]
+  bookings    Booking[]
+  expenses    Expense[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model User {
+  id          String  @id @default(cuid())
+  googleId    String? @unique
+  email       String  @unique
+  password    String
+  firstName   String?
+  lastName    String?
+  phone       String?
+  avatarUrl   String?
+  accountType String? // 'studio' or 'worker'
+  studioId    String?
+
+  googleAccessToken  String?
+  googleRefreshToken String?
+  calendarSyncToken  String?
+  expoPushToken      String?
+
+  // Keeping whatsapp for later, but removing OTP requirement
+  whatsapp          String?
+  whatsappVerified  Boolean   @default(false)
+  whatsappOtp         String?
+  whatsappOtpExpiry   DateTime?
+  whatsappOtpAttempts Int       @default(0)
+
+  studio        Studio?        @relation("StudioCreatives", fields: [studioId], references: [id])
+  userRoles     UserRole[]
+  studioMembers StudioMember[]
+  workerProfile WorkerProfile?
+  notifications Notification[]
+  files         File[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model UserRole {
+  userId     String
+  roleId     String
+  assignedAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+  role Role @relation(fields: [roleId], references: [id])
+
+  @@id([userId, roleId])
+}
+
+model StudioMember {
+  id       String       @id @default(cuid())
+  studioId String
+  studio   Studio       @relation(fields: [studioId], references: [id])
+  userId   String
+  user     User         @relation(fields: [userId], references: [id])
+  role     MemberRole   @default(MEMBER)
+  status   MemberStatus @default(INVITED)
+  joinedAt DateTime     @default(now())
+
+  @@unique([studioId, userId])
+}
+
+model WorkerProfile {
+  id             String  @id @default(cuid())
+  userId         String  @unique
+  user           User    @relation(fields: [userId], references: [id])
+  workerPublicId String  @unique // e.g. TM-847521
+  primaryRole    String?
+  primaryGear    String?
+  city           String?
+  state          String?
+  bio            String?
+  active         Boolean @default(true)
+
+  skills      WorkerSkill[]
+  assignments CrewAssignment[]
+  payments    WorkerPayment[]
+}
+
+model WorkerSkill {
+  id       String        @id @default(cuid())
+  workerId String
+  worker   WorkerProfile @relation(fields: [workerId], references: [id], onDelete: Cascade)
+  skill    String
+}
+
+
+model Booking {
+  id          String        @id @default(cuid())
+  studioId    String
+  studio      Studio        @relation(fields: [studioId], references: [id])
+  eventType   String? // Wedding, Mitzvah, etc.
+  eventDate   DateTime?
+  location    String?
+  title       String? // Sarah & David Wedding
+  status      BookingStatus @default(DRAFT)
+  agreedPrice Decimal?      @db.Decimal(10, 2)
+  currency    String?       @default("USD")
+  managerId   String?
+  notes       String?
+
+  people         BookingPerson[]
+  eventParts     EventPart[]
+  assignments    CrewAssignment[]
+  clientPayments ClientPayment[]
+  expenses       Expense[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model BookingPerson {
+  id         String  @id @default(cuid())
+  bookingId  String
+  booking    Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  personType String // bride, groom, celebrant, orderer, etc.
+  firstName  String?
+  lastName   String?
+  phone      String?
+  email      String?
+}
+
+model EventPart {
+  id         String    @id @default(cuid())
+  bookingId  String
+  booking    Booking   @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  partType   String? // Preparation, Ceremony, Dance
+  customName String?
+  startAt    DateTime?
+  endAt      DateTime?
+  venueName  String?
+  address    String?
+  city       String?
+  state      String?
+  zipCode    String?
+  notes      String?
+  sortOrder  Int       @default(0)
+
+  assignments CrewAssignmentPart[]
+}
+
+model CrewAssignment {
+  id        String           @id @default(cuid())
+  bookingId String
+  booking   Booking          @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  workerId  String
+  worker    WorkerProfile    @relation(fields: [workerId], references: [id])
+  role      String?
+  agreedFee Decimal?         @db.Decimal(10, 2)
+  deposit   Decimal?         @db.Decimal(10, 2)
+  callTime  DateTime?
+  status    AssignmentStatus @default(ASSIGNED)
+  notes     String?
+
+  assignedParts CrewAssignmentPart[]
+  payments      WorkerPayment[]
+}
+
+model CrewAssignmentPart {
+  id           String         @id @default(cuid())
+  assignmentId String
+  assignment   CrewAssignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  eventPartId  String
+  eventPart    EventPart      @relation(fields: [eventPartId], references: [id], onDelete: Cascade)
+
+  @@unique([assignmentId, eventPartId])
+}
+
+model ClientPayment {
+  id            String            @id @default(cuid())
+  bookingId     String
+  booking       Booking           @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  amount        Decimal           @db.Decimal(10, 2)
+  paymentType   ClientPaymentType
+  paymentDate   DateTime?
+  paymentMethod String?
+  notes         String?
+  createdById   String?
+}
+
+model WorkerPayment {
+  id            String         @id @default(cuid())
+  assignmentId  String
+  assignment    CrewAssignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  workerId      String
+  worker        WorkerProfile  @relation(fields: [workerId], references: [id])
+  amount        Decimal        @db.Decimal(10, 2)
+  paymentDate   DateTime?
+  paymentMethod String?
+  notes         String?
+  createdById   String?
+  status        PaymentStatus @default(PENDING)
+}
+
+model Expense {
+  id          String    @id @default(cuid())
+  studioId    String
+  studio      Studio    @relation(fields: [studioId], references: [id])
+  bookingId   String?
+  booking     Booking?  @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  category    String?
+  description String?
+  amount      Decimal   @db.Decimal(10, 2)
+  expenseDate DateTime?
+  notes       String?
+}
+
+model Notification {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title       String
+  message     String
+  type        String
+  referenceId String?
+  read        Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model File {
+  id         String   @id @default(cuid())
+  name       String
+  type       String
+  color      String?
+  size       Int?
+  uploaderId String?
+  uploader   User?    @relation(fields: [uploaderId], references: [id])
+  createdAt  DateTime @default(now())
+}
+
+enum PaymentStatus {
+  PENDING
+  CONFIRMED
+}
