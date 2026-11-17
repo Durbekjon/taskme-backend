@@ -74,6 +74,27 @@ export const env = {
   get whatsappPhoneNumberId() {
     return process.env.META_WA_PHONE_NUMBER_ID || '';
   },
+  /** Approved Meta template in the "Authentication" category (copy-code button). */
+  get whatsappOtpTemplate() {
+    return optional('META_WA_OTP_TEMPLATE', 'taskme_otp');
+  },
+  get whatsappOtpLanguage() {
+    return optional('META_WA_OTP_LANGUAGE', 'en_US');
+  },
+  get whatsappApiVersion() {
+    return optional('META_WA_API_VERSION', 'v23.0');
+  },
+  get whatsappConfigured() {
+    return !!(process.env.META_WA_ACCESS_TOKEN && process.env.META_WA_PHONE_NUMBER_ID);
+  },
+  /**
+   * Whether onboarding must verify the phone over WhatsApp. Off unless
+   * WHATSAPP_OTP_REQUIRED=true: switch it on only once Meta has approved the
+   * business and the OTP template, or onboarding is blocked for everyone.
+   */
+  get whatsappOtpRequired() {
+    return process.env.WHATSAPP_OTP_REQUIRED === 'true';
+  },
 
   get redisHost() {
     return optional('REDIS_HOST', 'localhost');
