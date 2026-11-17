@@ -21,6 +21,8 @@ import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { AuthResponse, AuthUser } from './auth.types';
 import { generateWorkerPublicId, normalizeWorkerPublicId } from './creative-id';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
+import { AppleAuthService } from './apple-auth.service';
+import { AppleSignInDto } from './dto/apple-sign-in.dto';
 
 const OTP_TTL_MINUTES = 10;
 const OTP_MAX_ATTEMPTS = 5;
@@ -43,6 +45,7 @@ export class AuthService {
     private prisma: PrismaService,
     private jwtService: JwtService,
     private whatsappService: WhatsappService,
+    private appleAuth: AppleAuthService,
   ) {}
 
   // -------------------------------------------------------------------------
@@ -160,6 +163,68 @@ export class AuthService {
   // -------------------------------------------------------------------------
   // Google OAuth
   // -------------------------------------------------------------------------
+
+  /**
+   * Sign in with Apple. Matches by Apple id first, then links an existing
+   * account with the same verified email, otherwise creates a new user that
+   * goes through onboarding like a Google sign-up.
+   */
+  async signInWithApple(dto: AppleSignInDto): Promise<AuthResponse> {
+    const identity = await this.appleAuth.verifyIdentityToken(dto.identityToken, dto.nonce);
+    const refreshToken = dto.authorizationCode
+      ? await this.appleAuth.refreshTokenFor(dto.authorizationCode)
+      : null;
+    const tokenUpdate = refreshToken ? { appleRefreshToken: refreshToken } : {};
+
+    let user = await this.prisma.user.findUnique({
+      where: { appleId: identity.appleId },
+      include: AUTH_USER_INCLUDE,
+    });
+
+    if (!user && identity.email && identity.emailVerified) {
+      const byEmail = await this.prisma.user.findUnique({ where: { email: identity.email } });
+      if (byEmail && !byEmail.deletedAt) {
+        user = await this.prisma.user.update({
+          where: { id: byEmail.id },
+          data: { appleId: identity.appleId, ...tokenUpdate },
+          include: AUTH_USER_INCLUDE,
+        });
+      }
+    }
+
+    if (user) {
+      if (user.deletedAt) throw new UnauthorizedException();
+      if (refreshToken) {
+        await this.prisma.user.update({ where: { id: user.id }, data: tokenUpdate });
+      }
+      return this.buildAuthResponse(user);
+    }
+
+    if (!identity.email) {
+      // Apple omits the email after the first sign-in; without an account to
+      // match there is nothing to attach it to.
+      throw new BadRequestException(
+        'Apple did not share an email. Remove Task.me under Settings → Apple ID → Sign in with Apple and try again.',
+      );
+    }
+
+    const defaultRole = await this.prisma.role.findUnique({ where: { name: 'USER' } });
+    const created = await this.prisma.user.create({
+      data: {
+        email: identity.email,
+        appleId: identity.appleId,
+        firstName: dto.firstName,
+        lastName: dto.lastName,
+        password: '', // Apple-only account, see validateUser()
+        ...tokenUpdate,
+        userRoles: defaultRole
+          ? { create: [{ role: { connect: { id: defaultRole.id } } }] }
+          : undefined,
+      },
+      include: AUTH_USER_INCLUDE,
+    });
+    return this.buildAuthResponse(created);
+  }
 
   /** Exchange codes already redeemed; entries expire with the code. */
   private readonly usedExchangeCodes = new Map<string, number>();

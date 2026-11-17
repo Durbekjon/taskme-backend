@@ -85,6 +85,8 @@ model Studio {
 model User {
   id          String  @id @default(cuid())
   googleId    String? @unique
+  /// Stable Apple user id (`sub` of the identity token).
+  appleId     String? @unique
   email       String  @unique
   password    String
   firstName   String?
@@ -96,6 +98,8 @@ model User {
 
   googleAccessToken  String?
   googleRefreshToken String?
+  /// Kept only so it can be revoked when the account is deleted (Apple rule).
+  appleRefreshToken  String?
   calendarSyncToken  String?
   expoPushToken      String?
 

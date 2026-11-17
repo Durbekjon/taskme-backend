@@ -7,6 +7,7 @@ import {
 import { MemberStatus, MemberRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { GoogleCalendarService } from '../calendar/google-calendar.service';
+import { AppleAuthService } from '../auth/apple-auth.service';
 import { normalizeWorkerPublicId } from '../auth/creative-id';
 import { TeamInviteAction } from './dto/team.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
@@ -59,6 +60,7 @@ export class UsersService {
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsGateway,
     private readonly calendar: GoogleCalendarService,
+    private readonly apple: AppleAuthService,
   ) {}
 
   /**
@@ -72,9 +74,12 @@ export class UsersService {
   async deleteOwnAccount(userId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, deletedAt: true },
+      select: { id: true, deletedAt: true, appleRefreshToken: true },
     });
     if (!user || user.deletedAt) return { deleted: true };
+
+    // Apple asks apps to revoke Sign in with Apple tokens on deletion.
+    if (user.appleRefreshToken) await this.apple.revoke(user.appleRefreshToken);
 
     // Revokes the Google grant and clears the stored tokens.
     await this.calendar.disconnect(userId).catch(() => undefined);
@@ -103,6 +108,8 @@ export class UsersService {
           phone: null,
           avatarUrl: null,
           googleId: null,
+          appleId: null,
+          appleRefreshToken: null,
           googleAccessToken: null,
           googleRefreshToken: null,
           calendarSyncToken: null,
