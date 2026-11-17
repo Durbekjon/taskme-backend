@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { MemberStatus, MemberRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { GoogleCalendarService } from '../calendar/google-calendar.service';
 import { normalizeWorkerPublicId } from '../auth/creative-id';
 import { TeamInviteAction } from './dto/team.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
@@ -41,7 +42,11 @@ type TeamMemberRow = {
     lastName: string | null;
     email: string;
     avatarUrl: string | null;
-    workerProfile: { id: string; workerPublicId: string; primaryRole: string | null } | null;
+    workerProfile: {
+      id: string;
+      workerPublicId: string;
+      primaryRole: string | null;
+    } | null;
   };
   id: string;
   role: MemberRole;
@@ -53,7 +58,65 @@ export class UsersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsGateway,
+    private readonly calendar: GoogleCalendarService,
   ) {}
+
+  /**
+   * Account deletion (App Store / Play / Google requirement).
+   *
+   * The row is anonymised rather than removed: bookings, crew assignments
+   * and payments belong to studios and must keep adding up. Everything that
+   * identifies the person is scrubbed, Google access is revoked, roles and
+   * team memberships are dropped, and `deletedAt` makes existing JWTs fail.
+   */
+  async deleteOwnAccount(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, deletedAt: true },
+    });
+    if (!user || user.deletedAt) return { deleted: true };
+
+    // Revokes the Google grant and clears the stored tokens.
+    await this.calendar.disconnect(userId).catch(() => undefined);
+
+    await this.prisma.$transaction([
+      this.prisma.userRole.deleteMany({ where: { userId } }),
+      this.prisma.studioMember.deleteMany({ where: { userId } }),
+      this.prisma.notification.deleteMany({ where: { userId } }),
+      this.prisma.workerProfile.updateMany({
+        where: { userId },
+        data: {
+          bio: null,
+          city: null,
+          state: null,
+          primaryGear: null,
+          active: false,
+        },
+      }),
+      this.prisma.user.update({
+        where: { id: userId },
+        data: {
+          email: `deleted+${userId}@deleted.invalid`,
+          password: '',
+          firstName: 'Deleted',
+          lastName: 'user',
+          phone: null,
+          avatarUrl: null,
+          googleId: null,
+          googleAccessToken: null,
+          googleRefreshToken: null,
+          calendarSyncToken: null,
+          expoPushToken: null,
+          whatsapp: null,
+          whatsappVerified: false,
+          whatsappOtp: null,
+          whatsappOtpExpiry: null,
+          deletedAt: new Date(),
+        },
+      }),
+    ]);
+    return { deleted: true };
+  }
 
   async findOne(id: string) {
     const user = await this.prisma.user.findUnique({
@@ -78,7 +141,11 @@ export class UsersService {
    * people on its team. Anything else is a 404 rather than a 403 so the
    * endpoint cannot be used to probe which ids exist.
    */
-  async findOneVisibleTo(id: string, actorId: string, actorStudioId: string | null) {
+  async findOneVisibleTo(
+    id: string,
+    actorId: string,
+    actorStudioId: string | null,
+  ) {
     if (id !== actorId) {
       const sharesStudio =
         actorStudioId !== null &&
@@ -116,7 +183,9 @@ export class UsersService {
    */
   async updateOwnProfile(userId: string, dto: UpdateProfileDto) {
     const { firstName, lastName, avatarUrl, ...workerFields } = dto;
-    const hasWorkerFields = Object.values(workerFields).some((v) => v !== undefined);
+    const hasWorkerFields = Object.values(workerFields).some(
+      (v) => v !== undefined,
+    );
 
     const existing = await this.prisma.user.findUnique({
       where: { id: userId },
@@ -210,7 +279,9 @@ export class UsersService {
       throw new NotFoundException(`No creative found with ID ${normalized}`);
     }
 
-    const studio = await this.prisma.studio.findUnique({ where: { id: studioId } });
+    const studio = await this.prisma.studio.findUnique({
+      where: { id: studioId },
+    });
     if (!studio) throw new NotFoundException('Studio not found');
 
     const existing = await this.prisma.studioMember.findUnique({
@@ -290,9 +361,15 @@ export class UsersService {
     return { success: true, action };
   }
 
-  async removeUserFromStudio(userId: string, studioId: string, actingUserId: string) {
+  async removeUserFromStudio(
+    userId: string,
+    studioId: string,
+    actingUserId: string,
+  ) {
     if (userId === actingUserId) {
-      throw new BadRequestException('You cannot remove yourself from your own studio');
+      throw new BadRequestException(
+        'You cannot remove yourself from your own studio',
+      );
     }
 
     const member = await this.prisma.studioMember.findUnique({

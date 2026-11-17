@@ -42,6 +42,10 @@ export const env = {
       .map((origin) => origin.trim())
       .filter(Boolean);
   },
+  /** Deep link the mobile app listens on after Google sign-in. */
+  get mobileAuthRedirect() {
+    return optional('MOBILE_AUTH_REDIRECT', 'taskme://auth/google');
+  },
   get frontendUrl() {
     return optional('FRONTEND_URL', 'http://localhost:3000');
   },
