@@ -1,3 +1,4 @@
+import { CalendarModule } from './calendar/calendar.module';
 import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
 import { ThrottlerModule } from '@nestjs/throttler';
@@ -39,6 +40,7 @@ import { env } from './config/env';
     CrewAssignmentsModule,
     FinanceModule,
     NotificationsModule,
+    CalendarModule,
   ],
   controllers: [AppController],
   providers: [

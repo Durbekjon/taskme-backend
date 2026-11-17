@@ -21,6 +21,7 @@ import {
   type Conflict,
 } from './availability';
 import { NotificationsGateway } from '../notifications/notifications.gateway';
+import { GoogleCalendarService } from '../calendar/google-calendar.service';
 
 const ASSIGNMENT_WITH_CONTEXT = {
   worker: { include: { user: true } },
@@ -32,6 +33,7 @@ export class CrewAssignmentsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsGateway,
+    private readonly calendar: GoogleCalendarService,
   ) {}
 
   async create(dto: CreateCrewAssignmentDto, studioId: string) {
@@ -88,7 +90,7 @@ export class CrewAssignmentsService {
       }
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    const created = await this.prisma.$transaction(async (tx) => {
       const assignment = await tx.crewAssignment.create({
         data: {
           ...assignmentData,
@@ -162,6 +164,11 @@ export class CrewAssignmentsService {
 
       return assignment;
     });
+
+    // Put the job in the creative's calendar straight away, marked pending
+    // until they accept. Runs after commit so Google sees the final state.
+    void this.calendar.syncBooking(bookingId);
+    return created;
   }
 
   /**
@@ -438,6 +445,8 @@ export class CrewAssignmentsService {
       include: ASSIGNMENT_WITH_CONTEXT,
     });
 
+    void this.calendar.syncBooking(a.bookingId);
+
     if (existing) {
       const workerUserId = existing.worker.userId;
       const studioName = existing.booking.studio?.name ?? 'Your studio';
@@ -532,6 +541,10 @@ export class CrewAssignmentsService {
       include: ASSIGNMENT_WITH_CONTEXT,
     });
 
+    // Mirror the decision into Google Calendar: accepted -> confirmed event,
+    // declined -> removed. Not awaited so Google never delays the response.
+    void this.calendar.syncBooking(existing.bookingId);
+
     // Notify the studio owner in real-time.
     const workerName =
       `${existing.worker.user?.firstName ?? ''} ${existing.worker.user?.lastName ?? ''}`.trim() ||
@@ -588,6 +601,10 @@ export class CrewAssignmentsService {
     });
 
     await this.prisma.crewAssignment.delete({ where: { id } });
+    if (existing) {
+      // The worker is no longer on the booking, so name them explicitly.
+      void this.calendar.syncBooking(existing.bookingId, [existing.worker.userId]);
+    }
 
     if (existing) {
       const workerUserId = existing.worker.userId;

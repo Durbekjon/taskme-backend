@@ -173,7 +173,9 @@ export class AuthService {
         data: {
           googleId: googleUser.googleId,
           googleAccessToken: googleUser.accessToken,
-          googleRefreshToken: googleUser.refreshToken ?? null,
+          // Google sends a refresh token only on first consent; a later login
+          // without one must not wipe the token we already hold.
+          ...(googleUser.refreshToken ? { googleRefreshToken: googleUser.refreshToken } : {}),
           avatarUrl: googleUser.avatarUrl,
         },
         include: AUTH_USER_INCLUDE,

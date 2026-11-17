@@ -3,10 +3,14 @@ import { BookingStatus, Prisma } from '@prisma/client';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { UpdateBookingDto } from './dto/update-booking.dto';
 import { PrismaService } from '../prisma/prisma.service';
+import { GoogleCalendarService } from '../calendar/google-calendar.service';
 
 @Injectable()
 export class BookingsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly calendar: GoogleCalendarService,
+  ) {}
 
   private async autoAdvanceStatuses(studioId: string) {
     const todayStart = new Date();
@@ -36,7 +40,7 @@ export class BookingsService {
   async create(createBookingDto: CreateBookingDto, studioId: string) {
     const { people, parts, deposit, ...bookingData } = createBookingDto;
 
-    return this.prisma.$transaction(async (tx) => {
+    const created = await this.prisma.$transaction(async (tx) => {
       const booking = await tx.booking.create({
         data: {
           ...bookingData,
@@ -66,6 +70,10 @@ export class BookingsService {
 
       return booking;
     });
+
+    // New bookings land in the studio owners' (and manager's) Google Calendar.
+    void this.calendar.syncBooking(created.id);
+    return created;
   }
 
   async findAll(studioId: string, page: number = 1, limit: number = 20, filters: any = {}) {
@@ -165,7 +173,7 @@ export class BookingsService {
 
     const { people, parts, deposit, ...updateData } = updateBookingDto as any;
 
-    return this.prisma.$transaction(async (tx) => {
+    const updated = await this.prisma.$transaction(async (tx) => {
       if (people !== undefined) {
         await tx.bookingPerson.deleteMany({ where: { bookingId: id } });
       }
@@ -192,11 +200,17 @@ export class BookingsService {
         },
       });
     });
+
+    // Times, parts, title or status may have changed — studio and crew alike.
+    void this.calendar.syncBooking(id);
+    return updated;
   }
 
   async remove(id: string, studioId: string) {
     await this.assertOwned(id, studioId);
+    const calendarUsers = await this.calendar.calendarUsersFor(id).catch(() => []);
     await this.prisma.booking.delete({ where: { id } });
+    void this.calendar.clearBooking(id, calendarUsers);
     return { success: true };
   }
 
