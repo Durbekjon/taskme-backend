@@ -40,6 +40,16 @@ export class AuthController {
     return this.authService.login(loginDto);
   }
 
+  @Public()
+  @Get('config')
+  @ApiOperation({ summary: 'Public auth settings the clients adapt to' })
+  config() {
+    return {
+      googleEnabled: env.googleOAuthEnabled,
+      whatsappOtpRequired: env.whatsappOtpRequired,
+    };
+  }
+
   @Get('me')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get the currently authenticated user' })

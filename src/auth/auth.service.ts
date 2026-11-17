@@ -1,5 +1,8 @@
 import {
   BadRequestException,
+  ForbiddenException,
+  HttpException,
+  HttpStatus,
   Injectable,
   Logger,
   NotFoundException,
@@ -8,6 +11,8 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma/prisma.service';
 import * as bcrypt from 'bcrypt';
+import { randomInt } from 'crypto';
+import { env } from '../config/env';
 import { CreateUserDto } from '../users/dto/create-user.dto';
 import { LoginDto } from './dto/login.dto';
 import { OnboardingDto, OnboardingRole } from './dto/onboarding.dto';
@@ -19,6 +24,8 @@ import { WhatsappService } from '../whatsapp/whatsapp.service';
 
 const OTP_TTL_MINUTES = 10;
 const OTP_MAX_ATTEMPTS = 5;
+/** Minimum gap between two codes for the same user. */
+const OTP_RESEND_SECONDS = 60;
 
 /** Everything needed to build an AuthUser in one query. */
 const AUTH_USER_INCLUDE = {
@@ -212,6 +219,16 @@ export class AuthService {
     });
     if (!existingUser) throw new NotFoundException('User not found');
 
+    // When verification is on, the number on the account is the one that was
+    // proven over WhatsApp - never a fresh value from the request body.
+    let whatsapp = dto.whatsapp;
+    if (env.whatsappOtpRequired) {
+      if (!existingUser.whatsappVerified || !existingUser.whatsapp) {
+        throw new ForbiddenException('Verify your WhatsApp number before continuing.');
+      }
+      whatsapp = existingUser.whatsapp;
+    }
+
     const roleName = dto.role === OnboardingRole.STUDIO ? 'ADMIN' : 'CREATIVE';
     const role = await this.prisma.role.upsert({
       where: { name: roleName },
@@ -236,7 +253,7 @@ export class AuthService {
           data: {
             firstName: dto.firstName,
             lastName: dto.lastName,
-            whatsapp: dto.whatsapp,
+            whatsapp,
             accountType: 'studio',
             studioId: studio.id,
             userRoles: userRolesUpdate,
@@ -261,7 +278,7 @@ export class AuthService {
       data: {
         firstName: dto.firstName,
         lastName: dto.lastName,
-        whatsapp: dto.whatsapp,
+        whatsapp,
         accountType: 'worker',
         userRoles: userRolesUpdate,
         workerProfile: existingUser.workerProfile
@@ -301,10 +318,25 @@ export class AuthService {
   // -------------------------------------------------------------------------
 
   async sendWhatsappOtp(userId: string, dto: SendOtpDto) {
-    const otp = String(Math.floor(100000 + Math.random() * 900000));
+    const current = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { whatsappOtpExpiry: true },
+    });
+    if (current?.whatsappOtpExpiry) {
+      const sentAt = current.whatsappOtpExpiry.getTime() - OTP_TTL_MINUTES * 60_000;
+      const wait = Math.ceil((sentAt + OTP_RESEND_SECONDS * 1000 - Date.now()) / 1000);
+      if (wait > 0) {
+        throw new HttpException(
+          `Please wait ${wait}s before requesting a new code.`,
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
+      }
+    }
+
+    const otp = String(randomInt(100000, 1000000));
     const expiry = new Date(Date.now() + OTP_TTL_MINUTES * 60_000);
 
-    const user = await this.prisma.user.update({
+    await this.prisma.user.update({
       where: { id: userId },
       data: {
         whatsapp: dto.phoneNumber,
@@ -316,8 +348,8 @@ export class AuthService {
       },
     });
 
-    await this.whatsappService.sendOtp(dto.phoneNumber, otp, user.firstName || 'User');
-    return { message: 'OTP sent successfully' };
+    await this.whatsappService.sendOtp(dto.phoneNumber, otp);
+    return { message: 'OTP sent successfully', resendAfterSeconds: OTP_RESEND_SECONDS };
   }
 
   async verifyWhatsappOtp(userId: string, dto: VerifyOtpDto) {
