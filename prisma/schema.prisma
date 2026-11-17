@@ -99,6 +99,10 @@ model User {
   calendarSyncToken  String?
   expoPushToken      String?
 
+  /// Set when the user deleted their account; personal data is scrubbed and
+  /// existing tokens stop working.
+  deletedAt DateTime?
+
   // Keeping whatsapp for later, but removing OTP requirement
   whatsapp          String?
   whatsappVerified  Boolean   @default(false)

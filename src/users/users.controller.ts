@@ -5,6 +5,7 @@ import {
   Get,
   Param,
   Patch,
+  Delete,
   Post,
   Put,
   UploadedFile,
@@ -53,6 +54,14 @@ export class UsersController {
     @Body() dto: UpdateProfileDto,
   ) {
     return this.usersService.updateOwnProfile(user.id, dto);
+  }
+
+  @Delete('me')
+  @ApiOperation({
+    summary: 'Delete the caller\'s account (personal data is scrubbed, access revoked)',
+  })
+  deleteOwnAccount(@CurrentUser() user: AuthenticatedUser) {
+    return this.usersService.deleteOwnAccount(user.id);
   }
 
   @Post('me/avatar')
