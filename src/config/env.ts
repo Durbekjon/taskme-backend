@@ -42,6 +42,27 @@ export const env = {
       .map((origin) => origin.trim())
       .filter(Boolean);
   },
+  /** Sign in with Apple: the iOS bundle id is the token audience. */
+  get appleBundleId() {
+    return optional('APPLE_BUNDLE_ID', 'com.taskme.app');
+  },
+  /**
+   * Optional: lets us exchange the authorization code for a refresh token
+   * and revoke it on account deletion, as Apple asks. Key = the .p8 contents.
+   */
+  get appleTeamId() {
+    return process.env.APPLE_TEAM_ID || '';
+  },
+  get appleKeyId() {
+    return process.env.APPLE_KEY_ID || '';
+  },
+  get applePrivateKey() {
+    return (process.env.APPLE_PRIVATE_KEY || '').replace(/\\n/g, '\n');
+  },
+  get appleRevocationEnabled() {
+    return !!(this.appleTeamId && this.appleKeyId && this.applePrivateKey);
+  },
+
   /** Deep link the mobile app listens on after Google sign-in. */
   get mobileAuthRedirect() {
     return optional('MOBILE_AUTH_REDIRECT', 'taskme://auth/google');

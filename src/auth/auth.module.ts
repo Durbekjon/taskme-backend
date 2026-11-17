@@ -5,6 +5,7 @@ import { PassportModule } from '@nestjs/passport';
 import { JwtModule, JwtModuleOptions } from '@nestjs/jwt';
 
 import { JwtStrategy } from './jwt.strategy';
+import { AppleAuthService } from './apple-auth.service';
 import { GoogleStrategy } from './google.strategy';
 import { PrismaModule } from '../prisma/prisma.module';
 import { env } from '../config/env';
@@ -25,8 +26,8 @@ import { WhatsappModule } from '../whatsapp/whatsapp.module';
       }),
     }),
   ],
-  providers: [AuthService, JwtStrategy, GoogleStrategy],
+  providers: [AuthService, JwtStrategy, GoogleStrategy, AppleAuthService],
   controllers: [AuthController],
-  exports: [AuthService],
+  exports: [AuthService, AppleAuthService],
 })
 export class AuthModule {}

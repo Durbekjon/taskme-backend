@@ -11,6 +11,7 @@ import { Public } from './public.decorator';
 import { GoogleAuthGuard } from './google-auth.guard';
 import { OnboardingDto } from './dto/onboarding.dto';
 import { GoogleExchangeDto } from './dto/google-exchange.dto';
+import { AppleSignInDto } from './dto/apple-sign-in.dto';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../common/types/authenticated-user';
 import { env } from '../config/env';
@@ -86,6 +87,16 @@ export class AuthController {
       `${env.frontendUrl}/auth/google/success?token=${encodeURIComponent(access_token)}`,
     );
     this.logger.debug(`Google OAuth completed for user ${user.id}`);
+  }
+
+  @Public()
+  @Post('apple')
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @ApiOperation({ summary: 'Sign in with Apple (iOS): verify the identity token and start a session' })
+  @ApiResponse({ status: 201, description: 'Returns { access_token, user }' })
+  signInWithApple(@Body() dto: AppleSignInDto) {
+    return this.authService.signInWithApple(dto);
   }
 
   @Public()

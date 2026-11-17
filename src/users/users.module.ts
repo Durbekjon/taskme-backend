@@ -3,6 +3,7 @@ import { MulterModule } from '@nestjs/platform-express';
 import { UsersService } from './users.service';
 import { UsersController } from './users.controller';
 import { StudioController } from './studio.controller';
+import { AuthModule } from '../auth/auth.module';
 import { CalendarModule } from '../calendar/calendar.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { NotificationsModule } from '../notifications/notifications.module';
@@ -13,10 +14,10 @@ import { NotificationsModule } from '../notifications/notifications.module';
     MulterModule.register({ dest: './uploads' }),
     NotificationsModule,
     CalendarModule,
+    AuthModule,
   ],
   controllers: [UsersController, StudioController],
   providers: [UsersService],
   exports: [UsersService],
 })
 export class UsersModule {}
-
