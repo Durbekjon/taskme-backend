@@ -11,7 +11,7 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma/prisma.service';
 import * as bcrypt from 'bcrypt';
-import { randomInt } from 'crypto';
+import { createHash, randomInt, randomUUID } from 'crypto';
 import { env } from '../config/env';
 import { CreateUserDto } from '../users/dto/create-user.dto';
 import { LoginDto } from './dto/login.dto';
@@ -160,6 +160,47 @@ export class AuthService {
   // -------------------------------------------------------------------------
   // Google OAuth
   // -------------------------------------------------------------------------
+
+  /** Exchange codes already redeemed; entries expire with the code. */
+  private readonly usedExchangeCodes = new Map<string, number>();
+
+  /**
+   * Mobile Google sign-in: a 2-minute, single-use code bound to the app's
+   * PKCE challenge. Only the app holding the matching verifier can redeem it.
+   */
+  issueMobileExchangeCode(userId: string, challenge: string): string {
+    return this.jwtService.sign(
+      { sub: userId, purpose: 'google-mobile', ch: challenge, jti: randomUUID() },
+      { expiresIn: '2m' },
+    );
+  }
+
+  async exchangeMobileCode(code: string, verifier: string): Promise<AuthResponse> {
+    let payload: { sub: string; purpose?: string; ch?: string; jti?: string; exp?: number };
+    try {
+      payload = this.jwtService.verify(code);
+    } catch {
+      throw new UnauthorizedException('Sign-in link expired, please try again');
+    }
+    const expected = createHash('sha256').update(verifier).digest('base64url');
+    if (payload.purpose !== 'google-mobile' || !payload.jti || payload.ch !== expected) {
+      throw new UnauthorizedException('Invalid sign-in code');
+    }
+
+    const now = Date.now();
+    for (const [jti, exp] of this.usedExchangeCodes) if (exp < now) this.usedExchangeCodes.delete(jti);
+    if (this.usedExchangeCodes.has(payload.jti)) {
+      throw new UnauthorizedException('Sign-in code already used');
+    }
+    this.usedExchangeCodes.set(payload.jti, (payload.exp ?? 0) * 1000);
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: payload.sub },
+      include: AUTH_USER_INCLUDE,
+    });
+    if (!user || user.deletedAt) throw new UnauthorizedException();
+    return this.buildAuthResponse(user);
+  }
 
   async validateGoogleUser(googleUser: {
     googleId: string;

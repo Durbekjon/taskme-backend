@@ -10,6 +10,7 @@ import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { Public } from './public.decorator';
 import { GoogleAuthGuard } from './google-auth.guard';
 import { OnboardingDto } from './dto/onboarding.dto';
+import { GoogleExchangeDto } from './dto/google-exchange.dto';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../common/types/authenticated-user';
 import { env } from '../config/env';
@@ -70,6 +71,14 @@ export class AuthController {
   @UseGuards(GoogleAuthGuard)
   @ApiOperation({ summary: 'Google OAuth2 callback' })
   async googleAuthCallback(@Req() req: any, @Res() res: any) {
+    // Mobile: return a short-lived, PKCE-bound code to the app's deep link.
+    // The JWT itself never travels through a URL another app could claim.
+    const state = typeof req.query?.state === 'string' ? req.query.state : '';
+    if (state.startsWith('m.')) {
+      const code = this.authService.issueMobileExchangeCode(req.user.id, state.slice(2));
+      return res.redirect(`${env.mobileAuthRedirect}?code=${encodeURIComponent(code)}`);
+    }
+
     const { access_token, user } = this.authService.buildAuthResponse(req.user);
     // Only the token travels in the URL; the client calls /auth/me for the
     // rest, so profile fields never end up in browser history or referrers.
@@ -77,6 +86,16 @@ export class AuthController {
       `${env.frontendUrl}/auth/google/success?token=${encodeURIComponent(access_token)}`,
     );
     this.logger.debug(`Google OAuth completed for user ${user.id}`);
+  }
+
+  @Public()
+  @Post('google/exchange')
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @ApiOperation({ summary: 'Mobile: trade the Google exchange code + PKCE verifier for a session' })
+  @ApiResponse({ status: 201, description: 'Returns { access_token, user }' })
+  exchangeGoogleCode(@Body() dto: GoogleExchangeDto) {
+    return this.authService.exchangeMobileCode(dto.code, dto.codeVerifier);
   }
 
   @Post('whatsapp/send-otp')
