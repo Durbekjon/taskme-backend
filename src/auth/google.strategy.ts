@@ -16,7 +16,7 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
       clientID: env.googleClientId || 'GOOGLE_NOT_CONFIGURED',
       clientSecret: env.googleClientSecret || 'GOOGLE_NOT_CONFIGURED',
       callbackURL: env.googleCallbackUrl,
-      scope: ['email', 'profile', 'https://www.googleapis.com/auth/calendar'],
+      scope: ['email', 'profile', 'https://www.googleapis.com/auth/calendar.events'],
     };
     super(options);
     this.logger.debug('GoogleStrategy initialized');
