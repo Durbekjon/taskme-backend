@@ -44,7 +44,7 @@ export const env = {
   },
   /** Sign in with Apple: the iOS bundle id is the token audience. */
   get appleBundleId() {
-    return optional('APPLE_BUNDLE_ID', 'com.taskme.app');
+    return optional('APPLE_BUNDLE_ID', 'me.gettask.app');
   },
   /**
    * Optional: lets us exchange the authorization code for a refresh token
